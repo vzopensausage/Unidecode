@@ -1,0 +1,62 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - name: Run decoder tests
+        run: dotnet run --project tests/Unidecode.Core.Tests/Unidecode.Core.Tests.csproj --configuration Release
+
+  package:
+    needs: test
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: x64
+            runtime: win-x64
+          - platform: ARM64
+            runtime: win-arm64
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - uses: microsoft/setup-msbuild@v2
+      - name: Generate package assets
+        shell: pwsh
+        run: ./scripts/GenerateAssets.ps1
+      - name: Build unsigned MSIX
+        shell: pwsh
+        run: >-
+          msbuild src/Unidecode/Unidecode.csproj
+          /restore
+          /m
+          /p:Configuration=Release
+          /p:Platform=${{ matrix.platform }}
+          /p:RuntimeIdentifier=${{ matrix.runtime }}
+          /p:GenerateAppxPackageOnBuild=true
+          /p:AppxPackageSigningEnabled=false
+          /p:AppxBundle=Never
+          /p:UapAppxPackageBuildMode=SideloadOnly
+          /p:AppxPackageDir=${{ github.workspace }}\artifacts\${{ matrix.platform }}\
+      - name: Upload unsigned package
+        uses: actions/upload-artifact@v4
+        with:
+          name: Unidecode-${{ matrix.platform }}-unsigned
+          path: artifacts/${{ matrix.platform }}/**/*.msix
+          if-no-files-found: error
